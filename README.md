@@ -189,7 +189,7 @@ IME本体の候補表示にはWinUIを直接使用せず、Win32 HWND上へDirec
 - Hyper-V と Windows 11 x64 の開発VM（VM統合サービスを有効にする）
 - JetBrains CLion
 
-ビルドスクリプトは Visual Studio の開発環境を初期化し、CMake/Ninja は PATH または CLion/Visual Studio の標準配置先から探します。Swift for Windows は別途インストールして PATH に追加してください。Windows SDK は TSF DLL と Swift toolchain が使います。
+ビルドスクリプトは Visual Studio の開発環境を初期化し、CMake/Ninja は PATH または CLion/Visual Studio の標準配置先から探します。Swift for Windows は PATH または公式インストーラーの標準配置先から探し、Windows SDK の `SDKROOT` も自動設定します。Windows SDK は TSF DLL と Swift toolchain が使います。
 
 AzooKeyKanaKanjiConverter は revision `80b8204f1cdfb364bb2ed355cf52c7ebb2519a0c`（`v0.11.2`）へ固定しています。このパッケージの manifest は Windows では一部依存を除外しますが、README の検証済みOS一覧に Windows は含まれていません。Windows runner のCIでビルドと最小変換を確認します。
 

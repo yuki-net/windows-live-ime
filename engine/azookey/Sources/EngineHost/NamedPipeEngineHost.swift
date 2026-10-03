@@ -23,13 +23,13 @@ public final class NamedPipeEngineHost {
                 nil
             )
         }
-        guard pipe != INVALID_HANDLE_VALUE else {
+        guard let pipe, pipe != INVALID_HANDLE_VALUE else {
             throw EngineHostError.pipeCreateFailed
         }
         defer { _ = CloseHandle(pipe) }
 
         while true {
-            guard ConnectNamedPipe(pipe, nil) != FALSE || GetLastError() == ERROR_PIPE_CONNECTED else {
+            guard ConnectNamedPipe(pipe, nil) || GetLastError() == ERROR_PIPE_CONNECTED else {
                 throw EngineHostError.pipeAcceptFailed(Int32(bitPattern: GetLastError()))
             }
             do {
@@ -60,12 +60,12 @@ public final class NamedPipeEngineHost {
         let deadline = GetTickCount64() + 5_000
         while offset < count {
             var available: DWORD = 0
-            guard PeekNamedPipe(pipe, nil, 0, nil, &available, nil) != FALSE else {
+            guard PeekNamedPipe(pipe, nil, 0, nil, &available, nil) else {
                 throw EngineHostError.pipeReadFailed(Int32(bitPattern: GetLastError()))
             }
             guard available > 0 else {
                 guard GetTickCount64() < deadline else {
-                    throw EngineHostError.pipeReadFailed(Int32(bitPattern: ERROR_SEM_TIMEOUT))
+                    throw EngineHostError.pipeReadFailed(ERROR_SEM_TIMEOUT)
                 }
                 Sleep(10)
                 continue
@@ -82,11 +82,11 @@ public final class NamedPipeEngineHost {
                     nil
                 )
             }
-            guard succeeded != FALSE else {
+            guard succeeded else {
                 throw EngineHostError.pipeReadFailed(Int32(bitPattern: GetLastError()))
             }
             guard transferred > 0 else {
-                throw EngineHostError.pipeReadFailed(Int32(bitPattern: ERROR_BROKEN_PIPE))
+                throw EngineHostError.pipeReadFailed(ERROR_BROKEN_PIPE)
             }
             offset += Int(transferred)
         }
@@ -106,11 +106,11 @@ public final class NamedPipeEngineHost {
                     nil
                 )
             }
-            guard succeeded != FALSE else {
+            guard succeeded else {
                 throw EngineHostError.pipeWriteFailed(Int32(bitPattern: GetLastError()))
             }
             guard transferred > 0 else {
-                throw EngineHostError.pipeWriteFailed(Int32(bitPattern: ERROR_BROKEN_PIPE))
+                throw EngineHostError.pipeWriteFailed(ERROR_BROKEN_PIPE)
             }
             offset += Int(transferred)
         }

@@ -21,6 +21,9 @@ windows_live_ime_enable_warnings(ime_named_pipe_client)
 add_executable(ime_ipc_ping tools/ipc_ping_main.cpp)
 target_link_libraries(ime_ipc_ping PRIVATE ime_named_pipe_client)
 target_compile_definitions(ime_ipc_ping PRIVATE UNICODE _UNICODE)
+set_target_properties(ime_ipc_ping PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts/$<CONFIG>"
+)
 windows_live_ime_enable_warnings(ime_ipc_ping)
 
 if(BUILD_TESTING)

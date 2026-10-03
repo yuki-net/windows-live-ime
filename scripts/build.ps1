@@ -26,7 +26,8 @@ try {
     $packagePath = Join-Path $repoRoot 'engine\azookey'
     Invoke-CheckedCommand $tools.Swift @('build', '--package-path', $packagePath, '--configuration', $swiftConfiguration)
     $swiftBinOutput = & $tools.Swift build --package-path $packagePath --configuration $swiftConfiguration --show-bin-path
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($swiftBinOutput)) {
+    $swiftExitCode = $LASTEXITCODE
+    if ($swiftExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($swiftBinOutput)) {
         throw 'SwiftPM did not return the engine host output directory.'
     }
     $swiftBinDirectory = ($swiftBinOutput | Select-Object -Last 1).Trim()

@@ -37,8 +37,10 @@ function Initialize-MsvcEnvironment {
         throw 'MSVC was not found. Install Visual Studio 2022 C++ x64/x86 build tools.'
     }
 
-    $installPath = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($installPath)) {
+    $installPathOutput = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    $vswhereExitCode = $LASTEXITCODE
+    $installPath = $installPathOutput | Select-Object -First 1
+    if ($vswhereExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($installPath)) {
         throw 'The MSVC x64/x86 workload is missing. Install Microsoft.VisualStudio.Component.VC.Tools.x86.x64.'
     }
 
@@ -49,7 +51,8 @@ function Initialize-MsvcEnvironment {
 
     $commandLine = 'call "{0}" -no_logo -arch=x64 -host_arch=x64 >nul && set' -f $developerCommand
     $environmentLines = & $env:ComSpec /d /c $commandLine
-    if ($LASTEXITCODE -ne 0) {
+    $developerCommandExitCode = $LASTEXITCODE
+    if ($developerCommandExitCode -ne 0) {
         throw 'VsDevCmd.bat could not initialize the x64 MSVC environment.'
     }
 
@@ -134,15 +137,18 @@ function Resolve-SwiftExecutable {
         throw 'Swift for Windows 6.1 or newer is required. Install the official Windows toolchain from swift.org, then add swift.exe to PATH.'
     }
 
-    $versionOutput = (& $swiftPath --version 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 0) {
+    $versionOutputLines = & $swiftPath --version 2>&1
+    $swiftExitCode = $LASTEXITCODE
+    $versionOutput = $versionOutputLines | Out-String
+    if ($swiftExitCode -ne 0) {
         throw "Swift could not report its version: $versionOutput"
     }
-    $match = [regex]::Match($versionOutput, 'Swift version\s+(\d+)\.(\d+)\.(\d+)')
+    $match = [regex]::Match($versionOutput, 'Swift version\s+(\d+)\.(\d+)(?:\.(\d+))?')
     if (-not $match.Success) {
         throw "Could not parse Swift version: $versionOutput"
     }
-    $version = [version]::new([int]$match.Groups[1].Value, [int]$match.Groups[2].Value, [int]$match.Groups[3].Value)
+    $patchVersion = if ($match.Groups[3].Success) { [int]$match.Groups[3].Value } else { 0 }
+    $version = [version]::new([int]$match.Groups[1].Value, [int]$match.Groups[2].Value, $patchVersion)
     if ($version -lt [version]'6.1.0') {
         throw "Swift 6.1 or newer is required by the pinned AzooKey package; found Swift $version."
     }
@@ -152,15 +158,18 @@ function Resolve-SwiftExecutable {
 }
 
 function Resolve-SwiftRuntimeDirectory([string]$SwiftExecutable) {
-    $versionOutput = (& $SwiftExecutable --version 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 0) {
+    $versionOutputLines = & $SwiftExecutable --version 2>&1
+    $swiftExitCode = $LASTEXITCODE
+    $versionOutput = $versionOutputLines | Out-String
+    if ($swiftExitCode -ne 0) {
         throw "Swift could not report its version while locating runtime DLLs: $versionOutput"
     }
-    $versionMatch = [regex]::Match($versionOutput, 'Swift version\s+(\d+)\.(\d+)\.(\d+)')
+    $versionMatch = [regex]::Match($versionOutput, 'Swift version\s+(\d+)\.(\d+)(?:\.(\d+))?')
     if (-not $versionMatch.Success) {
         throw "Could not determine the Swift runtime version from: $versionOutput"
     }
-    $swiftVersion = '{0}.{1}.{2}' -f $versionMatch.Groups[1].Value, $versionMatch.Groups[2].Value, $versionMatch.Groups[3].Value
+    $patchVersion = if ($versionMatch.Groups[3].Success) { $versionMatch.Groups[3].Value } else { '0' }
+    $swiftVersion = '{0}.{1}.{2}' -f $versionMatch.Groups[1].Value, $versionMatch.Groups[2].Value, $patchVersion
 
     $swiftBinDirectory = Split-Path -Parent $SwiftExecutable
     $swiftUsrDirectory = Split-Path -Parent $swiftBinDirectory
@@ -192,6 +201,39 @@ function Resolve-SwiftRuntimeDirectory([string]$SwiftExecutable) {
     throw "Could not locate Swift $swiftVersion runtime DLLs. Expected swiftCore.dll beside swift.exe or under Swift\\Runtimes\\$swiftVersion\\usr\\bin."
 }
 
+function Resolve-SwiftSdkDirectory([string]$SwiftExecutable) {
+    $sdkCandidates = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:SDKROOT)) {
+        $sdkCandidates += $env:SDKROOT
+    }
+
+    $swiftBinDirectory = Split-Path -Parent $SwiftExecutable
+    $swiftUsrDirectory = Split-Path -Parent $swiftBinDirectory
+    $toolchainDirectory = Split-Path -Parent $swiftUsrDirectory
+    $swiftInstallRoots = @(
+        (Split-Path -Parent (Split-Path -Parent $toolchainDirectory)),
+        (Join-Path $env:LOCALAPPDATA 'Programs\Swift'),
+        (Join-Path ${env:ProgramFiles} 'Swift')
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+    foreach ($installRoot in $swiftInstallRoots) {
+        $platformsDirectory = Join-Path $installRoot 'Platforms'
+        if (-not (Test-Path -LiteralPath $platformsDirectory)) {
+            continue
+        }
+        $sdkCandidates += Get-ChildItem -LiteralPath $platformsDirectory -Directory -Recurse -Filter 'Windows.sdk' -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.FullName }
+    }
+
+    foreach ($candidate in ($sdkCandidates | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+        if (Test-Path -LiteralPath (Join-Path $candidate 'usr\lib\swift\windows')) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    throw 'The Swift Windows SDK was not found. Install the Swift for Windows SDK or set SDKROOT to a Windows.sdk directory.'
+}
+
 function Resolve-MsvcRuntimeDirectory([string]$VisualStudioPath) {
     $candidateDirectories = @()
     if (-not [string]::IsNullOrWhiteSpace($env:VCToolsRedistDir)) {
@@ -220,20 +262,29 @@ function Initialize-WindowsLiveImeBuildTools {
     $vswhere = Get-VisualStudioWherePath
     $visualStudioPath = $null
     if ($vswhere) {
-        $visualStudioPath = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+        $visualStudioPathOutput = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        $vswhereExitCode = $LASTEXITCODE
+        $visualStudioPath = $visualStudioPathOutput | Select-Object -First 1
+        if ($vswhereExitCode -ne 0) {
+            throw 'vswhere could not locate the Visual Studio installation.'
+        }
     }
 
     $cmake = Resolve-CmakeExecutable
     $ninja = Resolve-NinjaExecutable $visualStudioPath
     $swift = Resolve-SwiftExecutable
     $swiftRuntime = Resolve-SwiftRuntimeDirectory $swift
+    $swiftSdk = Resolve-SwiftSdkDirectory $swift
     $msvcRuntime = Resolve-MsvcRuntimeDirectory $visualStudioPath
     Add-DirectoryToPath (Split-Path -Parent $cmake)
     Add-DirectoryToPath (Split-Path -Parent $ninja)
     Add-DirectoryToPath $swiftRuntime
+    $env:SDKROOT = $swiftSdk
 
-    $cmakeVersionOutput = (& $cmake --version 2>&1 | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0) {
+    $cmakeVersionLines = & $cmake --version 2>&1
+    $cmakeExitCode = $LASTEXITCODE
+    $cmakeVersionOutput = $cmakeVersionLines | Select-Object -First 1
+    if ($cmakeExitCode -ne 0) {
         throw 'CMake could not report its version.'
     }
     $cmakeMatch = [regex]::Match($cmakeVersionOutput, 'cmake version\s+(\d+)\.(\d+)\.(\d+)')
@@ -245,6 +296,7 @@ function Initialize-WindowsLiveImeBuildTools {
         CMake = $cmake
         Ninja = $ninja
         Swift = $swift
+        SwiftSdk = $swiftSdk
         SwiftRuntime = $swiftRuntime
         MsvcRuntime = $msvcRuntime
         VisualStudio = $visualStudioPath

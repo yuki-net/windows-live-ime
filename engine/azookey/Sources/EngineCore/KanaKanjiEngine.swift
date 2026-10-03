@@ -24,18 +24,26 @@ public final class KanaKanjiEngine {
         composingText.insertAtCursorPosition(input, inputStyle: .direct)
 
         let options = ConvertRequestOptions(
+            N_best: 10,
             requireJapanesePrediction: true,
             requireEnglishPrediction: false,
             keyboardLanguage: .ja_JP,
+            englishCandidateInRoman2KanaInput: true,
+            fullWidthRomanCandidate: false,
+            halfWidthKanaCandidate: false,
             learningType: .nothing,
+            maxMemoryCount: 0,
+            shouldResetMemory: false,
             memoryDirectoryURL: storageDirectory,
             sharedContainerURL: storageDirectory,
-            metadata: .init(versionString: "Windows Live IME"),
             textReplacer: .withDefaultEmojiDictionary(),
-            specialCandidateProviders: KanaKanjiConverter.defaultSpecialCandidateProviders
+            specialCandidateProviders: KanaKanjiConverter.defaultSpecialCandidateProviders,
+            zenzaiMode: .off,
+            preloadDictionary: false,
+            metadata: .init(versionString: "Windows Live IME")
         )
         let results = converter.requestCandidates(composingText, options: options)
-        return results.mainResults.map(\.text)
+        return results.mainResults.map { $0.text }
     }
 }
 

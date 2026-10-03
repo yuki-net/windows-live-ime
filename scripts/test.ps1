@@ -17,8 +17,8 @@ if (-not $NoBuild) {
         $buildArguments += '-CoreOnly'
     }
     & $buildScript @buildArguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Build script failed with exit code $LASTEXITCODE."
+    if (-not $?) {
+        throw 'Build script failed.'
     }
 }
 
