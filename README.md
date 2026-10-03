@@ -178,9 +178,62 @@ IME本体の候補表示にはWinUIを直接使用せず、Win32 HWND上へDirec
 
 ## Development
 
-初期構築中です。ビルド・インストール・デバッグ手順は基盤実装と合わせて追加します。
+### 必要な環境
 
-IMEの不具合は利用中アプリケーションへ影響する可能性があるため、初期開発ではVMまたは開発専用環境での検証を推奨します。
+- Windows 11 x64
+- Visual Studio 2022 の MSVC x64/x86 build tools
+- Windows 11 SDK
+- CMake 3.25 以上、Ninja
+- Swift for Windows 6.1 以上
+- PowerShell 5.1 と Git for Windows
+- Hyper-V と Windows 11 x64 の開発VM（VM統合サービスを有効にする）
+- JetBrains CLion
+
+ビルドスクリプトは Visual Studio の開発環境を初期化し、CMake/Ninja は PATH または CLion/Visual Studio の標準配置先から探します。Swift for Windows は別途インストールして PATH に追加してください。Windows SDK は TSF DLL と Swift toolchain が使います。
+
+AzooKeyKanaKanjiConverter は revision `80b8204f1cdfb364bb2ed355cf52c7ebb2519a0c`（`v0.11.2`）へ固定しています。このパッケージの manifest は Windows では一部依存を除外しますが、README の検証済みOS一覧に Windows は含まれていません。Windows runner のCIでビルドと最小変換を確認します。
+
+### C++ build / tests
+
+```powershell
+scripts/build.ps1 -Configuration Debug
+scripts/test.ps1 -Configuration Debug -NoBuild
+```
+
+`scripts/test.ps1` は Core/IPC の CTest、Swift の unit tests、AzooKey の初期化と最小変換を確認します。engine hostのself-checkはSwift/MSVC runtime DLLのPATH依存を外して実行し、VMへ配布する成果物だけで起動することも確認します。`-NoBuild` を外すと、先に build も実行します。`-CoreOnly` は TSF DLL を除いた Core/IPC 検証に使います。
+
+### Git pre-push hook
+
+```powershell
+scripts/setup-hooks.ps1
+```
+
+hook は Core/IPC の build と tests、engine host の build/check を実行します。VM 起動やIME登録は行いません。標準 Git の `--no-verify` 以外の bypass は設けていません。
+
+### Hyper-V development VM
+
+スクリプトは既存の Windows 11 x64 VM を使用します。初回は VM のローカル管理者アカウントを現在のWindowsユーザーで暗号化保存し、VM名を既定値 `WindowsLiveImeDev` に合わせます。engine host、Swift runtime DLL、MSVC x64 runtime DLLを同じ build 世代のフォルダーに配置するため、VMにSwift toolchainやVisual Studioをインストールする必要はありません。
+
+```powershell
+scripts/vm/setup-credential.ps1
+scripts/vm/setup.ps1
+```
+
+資格情報は `%LOCALAPPDATA%\windows-live-ime\vm-credential.xml` にユーザー単位で保護して保存され、リポジトリへ書き込みません。ホストとVMの間は PowerShell Direct を使うため、SSH、WinRM、固定IPは不要です。VMは事前に作成し、Windows 11をインストールしておく必要があります。
+
+CLion の `Dev IME` 共有Run Configurationは `scripts/dev.ps1` だけを呼びます。スクリプトがbuild、VM起動、世代別deploy、旧登録解除、新登録、engine-host起動とNamed Pipe health check、Notepad起動、VMConnectまで進めます。
+
+```powershell
+scripts/dev.ps1 -VMName WindowsLiveImeDev -Configuration Release
+```
+
+各deployは `C:\windows-live-ime-dev\builds\000001` のような別ディレクトリへ配置します。TSF DLLを同じ場所へ上書きしません。`scripts/vm/reset.ps1` は登録を解除してVMをシャットダウンし、deploy世代は保持します。任意のVM checkpointへ戻す場合は `-CheckpointName <name>` を指定します。
+
+共有Run Configurationは `.run/` にあります。`Core Tests` は build/test を実行し、`Reset Dev VM` は上記のreset scriptを実行します。
+
+### CI
+
+GitHub Actions は Windows 2022 runner で、MSVC/CMake/Ninja、Swift 6.1.3、Core、TSF DLL、IPC protocol、engine host と AzooKey 依存をbuild/testします。Pull Request と `develop` へのpushで動きます。
 
 ## License
 
