@@ -40,7 +40,7 @@ public final class KanaKanjiEngine {
             specialCandidateProviders: KanaKanjiConverter.defaultSpecialCandidateProviders,
             zenzaiMode: .off,
             preloadDictionary: false,
-            metadata: .init(versionString: "Windows Live IME")
+            metadata: .init(versionString: "Live IME")
         )
         let results = converter.requestCandidates(composingText, options: options)
         return results.mainResults.map { $0.text }

@@ -31,7 +31,7 @@ try {
         $existingIds = Get-ChildItem -LiteralPath $buildRoot -Directory -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -match '^\d{6}$' } |
             ForEach-Object { [int]$_.Name }
-        $nextId = if ($existingIds) { ($existingIds | Measure-Object -Maximum).Maximum + 1 } else { 1 }
+        [int]$nextId = if ($existingIds) { ($existingIds | Measure-Object -Maximum).Maximum + 1 } else { 1 }
         if ($nextId -gt 999999) {
             throw 'Development VM build ID space is exhausted.'
         }

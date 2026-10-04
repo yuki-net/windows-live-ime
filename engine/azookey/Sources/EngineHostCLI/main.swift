@@ -19,7 +19,7 @@ struct EngineHostMain {
 
         let pipeName = ProcessInfo.processInfo.environment["WINDOWS_LIVE_IME_PIPE_NAME"]
             ?? #"\\.\pipe\windows-live-ime"#
-        print("Windows Live IME engine host is listening.")
+        print("Live IME engine host is listening.")
         try NamedPipeEngineHost(engine: engine).run(pipeName: pipeName)
     }
 }

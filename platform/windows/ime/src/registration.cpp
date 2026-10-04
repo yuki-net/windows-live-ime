@@ -50,7 +50,7 @@ HRESULT register_com_class(const std::wstring& module_path) {
         return HRESULT_FROM_WIN32(status);
     }
 
-    auto result = write_registry_string(class_key, nullptr, L"Windows Live IME Text Service");
+    auto result = write_registry_string(class_key, nullptr, L"Live IME Text Service");
     HKEY inproc_key = nullptr;
     if (SUCCEEDED(result)) {
         status = RegCreateKeyExW(
@@ -136,7 +136,7 @@ HRESULT register_tsf_profile() {
         std::wstring module_path;
         result = get_module_path(module_path);
         if (SUCCEEDED(result)) {
-            constexpr wchar_t description[] = L"Windows Live IME";
+            constexpr wchar_t description[] = L"Live IME";
             result = profiles->AddLanguageProfile(
                 CLSID_WindowsLiveImeTextService,
                 MAKELANGID(LANG_JAPANESE, SUBLANG_DEFAULT),

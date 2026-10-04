@@ -53,15 +53,21 @@ function Connect-DevVm {
 
     $credential = Import-DevVmCredential
     $connectionDeadline = (Get-Date).AddSeconds($ConnectionTimeoutSeconds)
+    $lastConnectionError = $null
     do {
         try {
             return New-PSSession -VMName $VMName -Credential $credential -ErrorAction Stop
         } catch {
+            if ($null -eq $lastConnectionError) {
+                Write-Warning ("PowerShell Direct connection failed: {0}" -f $_.Exception.Message)
+            }
+            $lastConnectionError = $_
             Start-Sleep -Seconds 2
         }
     } while ((Get-Date) -lt $connectionDeadline)
 
-    throw "PowerShell Direct could not connect to VM '$VMName' before the connection timeout."
+    $reason = $lastConnectionError.Exception.Message
+    throw "PowerShell Direct could not connect to VM '$VMName' before the connection timeout. Last error: $reason. Check the saved credential against the administrator account inside the VM; run scripts/vm/setup-credential.ps1 to update it."
 }
 
 function Remove-DevVmSession([System.Management.Automation.Runspaces.PSSession]$Session) {
