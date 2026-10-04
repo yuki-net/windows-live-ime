@@ -6,9 +6,11 @@
 
 新しい入力ごとに request ID と generation ID を発行します。応答を反映する前に `LiveConversionCoordinator::is_current` で generation を確認し、古い結果を破棄します。変換engineの `submit` は処理をqueueしてすぐ戻る契約です。完了callbackはworker threadで呼ばれる場合があり、呼び出し側がTSF/UI threadへmarshalします。
 
-`platform/windows/ime/` はCOM class factory、TSF text service、DLL registration、Named Pipe clientを保持します。`platform/windows/renderer/candidate_renderer.hpp` はCore CandidateをWindows描画層へ渡す境界で、Direct2D/DirectWrite描画本体は後続Issueで実装します。
+`platform/windows/ime/` はCOM class factory、TSF text service、DLL registration、Named Pipe clientを保持します。`platform/windows/renderer/` はDirect2D/DirectWriteによる非アクティブ化候補ウィンドウを保持します。
 
-初期TSF serviceはロードと登録を担い、まだキーイベントや変換を処理しません。Named Pipe protocolと診断clientは独立してbuild/testできるため、後続IssueでTSF側の非同期変換接続を追加できます。
+TSF serviceはキーイベントを受け取り、Coreのローマ字解析結果をedit sessionでcompositionへ反映します。変換は専用workerからNamed Pipeへ要求し、結果をmessage window経由でTSF threadへ返します。generationが一致する最新結果だけを適用し、キー入力中に変換完了を待ちません。エンジン不通時にはかな入力を継続します。
+
+入力モードはTSFのopen/close・conversion compartmentと「あ／A」言語バーボタンへ反映します。英数モードでは文字キーをアプリへ渡します。候補選択はSpace・上下キー・数字キーで操作し、Enterで確定、Escで候補選択解除または入力取消を行います。F6〜F10は文字種変換です。
 
 ## Engine host
 

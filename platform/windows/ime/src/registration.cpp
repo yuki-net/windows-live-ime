@@ -9,6 +9,8 @@
 
 namespace windows_live_ime::ime {
 namespace {
+const std::array tip_categories{GUID_TFCAT_TIP_KEYBOARD,
+    GUID_TFCAT_TIPCAP_INPUTMODECOMPARTMENT, GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT};
 
 std::wstring clsid_string(REFGUID guid) {
     std::array<wchar_t, 40> buffer{};
@@ -161,10 +163,11 @@ HRESULT register_tsf_profile() {
             IID_ITfCategoryMgr,
             reinterpret_cast<void**>(&categories));
         if (SUCCEEDED(result)) {
-            result = categories->RegisterCategory(
-                CLSID_WindowsLiveImeTextService,
-                GUID_TFCAT_TIP_KEYBOARD,
-                CLSID_WindowsLiveImeTextService);
+            for (const auto& category : tip_categories) {
+                result = categories->RegisterCategory(CLSID_WindowsLiveImeTextService,
+                    category, CLSID_WindowsLiveImeTextService);
+                if (FAILED(result)) break;
+            }
         }
     }
     if (categories != nullptr) {
@@ -202,10 +205,10 @@ void unregister_tsf_profile() noexcept {
             CLSCTX_INPROC_SERVER,
             IID_ITfCategoryMgr,
             reinterpret_cast<void**>(&categories)))) {
-        categories->UnregisterCategory(
-            CLSID_WindowsLiveImeTextService,
-            GUID_TFCAT_TIP_KEYBOARD,
-            CLSID_WindowsLiveImeTextService);
+        for (const auto& category : tip_categories) {
+            categories->UnregisterCategory(CLSID_WindowsLiveImeTextService,
+                category, CLSID_WindowsLiveImeTextService);
+        }
         categories->Release();
     }
 

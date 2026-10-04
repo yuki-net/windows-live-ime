@@ -23,6 +23,7 @@ DWORD remaining_milliseconds(Clock::time_point deadline) noexcept {
 
 struct PendingIo final {
     OVERLAPPED overlapped{};
+    std::vector<std::uint8_t> buffer;
 };
 
 DWORD WINAPI reap_pending_io(LPVOID context) {
@@ -102,10 +103,12 @@ PipeError transfer_exact(
         }
 
         const auto chunk_size = static_cast<DWORD>(std::min<std::size_t>(size - offset, MAXDWORD));
+        pending->buffer.resize(chunk_size);
+        if (write) std::copy_n(buffer + offset, chunk_size, pending->buffer.data());
         DWORD transferred = 0;
         const BOOL completed = write
-            ? WriteFile(pipe, buffer + offset, chunk_size, &transferred, &pending->overlapped)
-            : ReadFile(pipe, buffer + offset, chunk_size, &transferred, &pending->overlapped);
+            ? WriteFile(pipe, pending->buffer.data(), chunk_size, &transferred, &pending->overlapped)
+            : ReadFile(pipe, pending->buffer.data(), chunk_size, &transferred, &pending->overlapped);
 
         if (!completed) {
             const auto last_error = GetLastError();
@@ -139,6 +142,7 @@ PipeError transfer_exact(
         if (transferred == 0) {
             return PipeError::Io;
         }
+        if (!write) std::copy_n(pending->buffer.data(), transferred, buffer + offset);
         offset += transferred;
     }
     return PipeError::None;

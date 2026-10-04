@@ -39,12 +39,16 @@ if(WINDOWS_LIVE_IME_BUILD_TSF)
         src/dllmain.cpp
         src/registration.cpp
         src/text_service.cpp
+        src/async_converter.cpp
+        src/mode_button.cpp
+        ../renderer/src/candidate_window.cpp
         windows_live_ime.def
     )
     target_include_directories(windows_live_ime
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/include
             ${PROJECT_SOURCE_DIR}/core/include
+            ${PROJECT_SOURCE_DIR}/platform/windows/renderer/include
     )
     target_link_libraries(windows_live_ime
         PRIVATE
@@ -53,6 +57,11 @@ if(WINDOWS_LIVE_IME_BUILD_TSF)
             advapi32
             ole32
             uuid
+            d2d1
+            dwrite
+            dwmapi
+            user32
+            gdi32
     )
     target_compile_definitions(windows_live_ime PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
     set_target_properties(windows_live_ime PROPERTIES
