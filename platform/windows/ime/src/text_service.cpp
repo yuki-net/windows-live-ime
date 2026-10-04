@@ -169,7 +169,7 @@ STDMETHODIMP TextService::OnKeyDown(ITfContext* context, WPARAM key, LPARAM flag
             if (key == VK_RETURN) { finish_input(); return S_OK; }
             if (key == VK_ESCAPE) { if (selecting_ || literal_) { refresh_input(context, false); } else finish_input(true); return S_OK; }
             if (key == VK_SPACE || key == VK_CONVERT || key == VK_DOWN || key == VK_UP || key == VK_PRIOR || key == VK_NEXT) {
-                if (candidates_.empty()) candidates_.push_back({input_.reading(true).text(), {}});
+                if (candidates_.empty()) candidates_.push_back({input_.reading().kana, {}});
                 if (selecting_) { const auto step = key == VK_PRIOR || key == VK_NEXT ? 9 : 1; if (key == VK_UP || key == VK_PRIOR) selected_ = (selected_ + candidates_.size() - static_cast<std::size_t>(step) % candidates_.size()) % candidates_.size(); else selected_ = (selected_ + step) % candidates_.size(); }
                 selecting_ = true; literal_ = false; choose_candidate(selected_, false); return S_OK;
             }
