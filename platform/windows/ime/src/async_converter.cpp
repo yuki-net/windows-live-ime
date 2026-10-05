@@ -47,7 +47,7 @@ void AsyncConverter::run(std::stop_token stop) {
             frame.request_id = request.request_id;
             frame.generation_id = request.generation_id;
             frame.payload.assign(utf8.begin(), utf8.end());
-            const auto exchange = client.exchange(frame, std::chrono::milliseconds(500));
+            const auto exchange = client.exchange(frame, std::chrono::milliseconds(3000));
             if (exchange.response && exchange.response->kind == MessageKind::ConvertResult &&
                 exchange.response->status == 0 && exchange.response->request_id == request.request_id &&
                 exchange.response->generation_id == request.generation_id) {

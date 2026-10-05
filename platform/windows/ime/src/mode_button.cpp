@@ -6,6 +6,8 @@
 #include <olectl.h>
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
+#include <string_view>
 
 namespace windows_live_ime::ime {
 namespace {
@@ -54,21 +56,76 @@ STDMETHODIMP ModeButton::Show(BOOL show) {
 STDMETHODIMP ModeButton::GetTooltipString(BSTR* text) {
     if (!text) { return E_POINTER; }
     *text = SysAllocString(service_ && service_->japanese_mode()
-        ? L"Live IME：日本語入力（Ctrl+Spaceで英数）" : L"Live IME：英数入力（Ctrl+Spaceで日本語）");
+        ? L"Live IME：日本語入力（左クリックで英数／右クリックで設定）" : L"Live IME：英数入力（左クリックで日本語／右クリックで設定）");
     return *text ? S_OK : E_OUTOFMEMORY;
 }
-STDMETHODIMP ModeButton::OnClick(TfLBIClick click, POINT, const RECT*) {
+STDMETHODIMP ModeButton::OnClick(TfLBIClick click, POINT point, const RECT*) {
     if (service_ && click == TF_LBI_CLK_LEFT) { service_->toggle_input_mode(); }
+    if (click == TF_LBI_CLK_RIGHT) {
+        const auto menu = CreatePopupMenu();
+        if (!menu) return HRESULT_FROM_WIN32(GetLastError());
+        const bool japanese = service_ && service_->japanese_mode();
+        AppendMenuW(menu, MF_STRING | (japanese ? MF_CHECKED : 0), 1, L"ひらがな");
+        AppendMenuW(menu, MF_STRING | MF_GRAYED, 3, L"（未実装）全角カタカナ");
+        AppendMenuW(menu, MF_STRING | MF_GRAYED, 4, L"（未実装）全角英数字");
+        AppendMenuW(menu, MF_STRING | MF_GRAYED, 5, L"（未実装）半角カタカナ");
+        AppendMenuW(menu, MF_STRING | (japanese ? 0 : MF_CHECKED), 2, L"半角英数字");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING | MF_GRAYED, 6, L"（未実装）単語の追加");
+        AppendMenuW(menu, MF_STRING | MF_GRAYED, 7, L"（未実装）プライベートモード（オフ）");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, 8, L"設定");
+        // BTN_MENU provides a language-bar drop-down, not a right-click menu.
+        // The tray's right-click callback must explicitly display its popup.
+        const auto owner = CreateWindowExW(WS_EX_TOOLWINDOW, L"STATIC", L"Live IME menu",
+            WS_POPUP, point.x, point.y, 0, 0, GetForegroundWindow(), nullptr, module_instance(), nullptr);
+        if (!owner) { DestroyMenu(menu); return HRESULT_FROM_WIN32(GetLastError()); }
+        const auto command = TrackPopupMenuEx(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
+            point.x, point.y, owner, nullptr);
+        DestroyMenu(menu); DestroyWindow(owner);
+        if (command) return OnMenuSelect(command);
+    }
     return S_OK;
 }
 STDMETHODIMP ModeButton::InitMenu(ITfMenu* menu) {
     if (!menu) { return E_POINTER; }
     const auto japanese = service_ && service_->japanese_mode();
-    menu->AddMenuItem(1, japanese ? TF_LBMENUF_CHECKED : 0, nullptr, nullptr, L"日本語入力", 5, nullptr);
-    return menu->AddMenuItem(2, japanese ? 0 : TF_LBMENUF_CHECKED, nullptr, nullptr, L"英数入力", 4, nullptr);
+    const auto add = [menu](UINT id, DWORD flags, std::wstring_view label) {
+        return menu->AddMenuItem(id, flags, nullptr, nullptr, label.data(), static_cast<ULONG>(label.size()), nullptr);
+    };
+    HRESULT result;
+    if (FAILED(result = add(1, japanese ? TF_LBMENUF_CHECKED : 0, L"ひらがな"))) return result;
+    if (FAILED(result = add(3, TF_LBMENUF_GRAYED, L"（未実装）全角カタカナ"))) return result;
+    if (FAILED(result = add(4, TF_LBMENUF_GRAYED, L"（未実装）全角英数字"))) return result;
+    if (FAILED(result = add(5, TF_LBMENUF_GRAYED, L"（未実装）半角カタカナ"))) return result;
+    if (FAILED(result = add(2, japanese ? 0 : TF_LBMENUF_CHECKED, L"半角英数字"))) return result;
+    if (FAILED(result = add(0, TF_LBMENUF_SEPARATOR, L""))) return result;
+    if (FAILED(result = add(6, TF_LBMENUF_GRAYED, L"（未実装）単語の追加"))) return result;
+    if (FAILED(result = add(7, TF_LBMENUF_GRAYED, L"（未実装）プライベートモード（オフ）"))) return result;
+    if (FAILED(result = add(0, TF_LBMENUF_SEPARATOR, L""))) return result;
+    return add(8, 0, L"設定");
 }
 STDMETHODIMP ModeButton::OnMenuSelect(UINT id) {
     if (service_ && (id == 1 || id == 2)) { service_->set_input_mode(id == 1); }
+    if (id == 8) {
+        // Resolve beside this loaded DLL, so an old in-memory IME cannot launch
+        // another deployment's settings and misleadingly report its version.
+        HMODULE module{};
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&kInputModeItem), &module)) return HRESULT_FROM_WIN32(GetLastError());
+        std::wstring path(32768, L'\0');
+        const auto length = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
+        if (!length || length >= path.size()) return E_FAIL;
+        path.resize(length);
+        const auto directory = std::filesystem::path(path).parent_path() / L"settings";
+        const auto exe = directory / L"LiveImeSettings.exe";
+        std::wstring command = L"\"" + exe.wstring() + L"\"";
+        STARTUPINFOW startup{sizeof(startup)};
+        PROCESS_INFORMATION process{};
+        if (!CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, FALSE, 0, nullptr,
+            directory.c_str(), &startup, &process)) return HRESULT_FROM_WIN32(GetLastError());
+        CloseHandle(process.hThread); CloseHandle(process.hProcess);
+    }
     return S_OK;
 }
 STDMETHODIMP ModeButton::GetIcon(HICON* icon) {

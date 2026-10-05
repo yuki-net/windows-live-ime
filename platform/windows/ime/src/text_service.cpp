@@ -8,10 +8,21 @@
 #include <oleauto.h>
 #include <algorithm>
 #include <new>
+#include "../../shared/shortcut_settings.hpp"
 
 namespace windows_live_ime::ime {
 using Microsoft::WRL::ComPtr;
 namespace {
+constexpr std::array<GUID, 8> shortcut_guids{{
+    {0x69380100,0x7251,0x4ac9,{0x92,0x31,0x41,0x88,0x11,0x71,0x00,0x01}},
+    {0x69380101,0x7251,0x4ac9,{0x92,0x31,0x41,0x88,0x11,0x71,0x00,0x01}},
+    {0x69380102,0x7251,0x4ac9,{0x92,0x31,0x41,0x88,0x11,0x71,0x00,0x01}},
+    {0x69380103,0x7251,0x4ac9,{0x92,0x31,0x41,0x88,0x11,0x71,0x00,0x01}},
+    {0x69380104,0x7251,0x4ac9,{0x92,0x31,0x41,0x88,0x11,0x71,0x00,0x01}},
+    {0x69380105,0x7251,0x4ac9,{0x92,0x31,0x41,0x88,0x11,0x71,0x00,0x01}},
+    {0x69380106,0x7251,0x4ac9,{0x92,0x31,0x41,0x88,0x11,0x71,0x00,0x01}},
+    {0x69380107,0x7251,0x4ac9,{0x92,0x31,0x41,0x88,0x11,0x71,0x00,0x01}}
+}};
 std::wstring wide(std::u32string_view text) {
     std::wstring result;
     for (auto c : text) {
@@ -85,6 +96,7 @@ STDMETHODIMP TextService::ActivateEx(ITfThreadMgr* manager, TfClientId client, D
         if (SUCCEEDED(result)) result = keystroke_manager_->AdviseKeyEventSink(client, this, TRUE);
         if (FAILED(result)) { Deactivate(); return result; }
         keys_advised_ = true;
+        preserve_shortcuts(false);
         ComPtr<ITfSource> source;
         if (SUCCEEDED(manager->QueryInterface(IID_PPV_ARGS(&source)))) source->AdviseSink(IID_ITfThreadMgrEventSink, static_cast<ITfThreadMgrEventSink*>(this), &thread_sink_cookie_);
         ComPtr<ITfCompartmentMgr> compartments;
@@ -104,6 +116,7 @@ STDMETHODIMP TextService::ActivateEx(ITfThreadMgr* manager, TfClientId client, D
 }
 STDMETHODIMP TextService::Deactivate() {
     finish_input(); converter_.reset();
+    preserve_shortcuts(true);
     if (keys_advised_) keystroke_manager_->UnadviseKeyEventSink(client_id_);
     keys_advised_ = false; keystroke_manager_.Reset();
     unadvise(thread_manager_, thread_sink_cookie_); unadvise(open_compartment_.Get(), open_sink_cookie_); unadvise(conversion_compartment_.Get(), conversion_sink_cookie_);
@@ -126,6 +139,40 @@ void TextService::set_input_mode(bool japanese) {
     if (mode_button_) mode_button_->refresh();
 }
 void TextService::toggle_input_mode() { set_input_mode(!japanese_mode_); }
+void TextService::preserve_shortcuts(bool remove) {
+    if (!keystroke_manager_) return;
+    for (std::size_t i = 0; i < shortcut_guids.size(); ++i) {
+        const auto index = std::min(i, settings::bindings.size() - 1);
+        auto binding = settings::bindings[index];
+        if (i >= settings::bindings.size()) { binding.key = VK_OEM_3; binding.modifiers = i == 6 ? settings::Alt : 0; }
+        TF_PRESERVEDKEY key{binding.key, static_cast<UINT>(binding.modifiers == settings::Control ? TF_MOD_CONTROL :
+            binding.modifiers == settings::Shift ? TF_MOD_SHIFT : binding.modifiers == settings::Alt ? TF_MOD_ALT : 0)};
+        if (remove) keystroke_manager_->UnpreserveKey(shortcut_guids[i], &key);
+        else keystroke_manager_->PreserveKey(client_id_, shortcut_guids[i], &key, L"Live IME", 8);
+    }
+}
+bool TextService::shortcut(ITfContext* context, WPARAM key, LPARAM flags, bool execute) {
+    const UINT modifiers = ((GetKeyState(VK_CONTROL) & 0x8000) ? settings::Control : 0) |
+        ((GetKeyState(VK_SHIFT) & 0x8000) ? settings::Shift : 0) |
+        ((GetKeyState(VK_MENU) & 0x8000) ? settings::Alt : 0);
+    auto index = settings::binding_index(static_cast<UINT>(key), modifiers, (flags >> 16) & 0xff);
+    auto action = index >= 0 ? settings::action(index) : settings::Action::None;
+    if (key == VK_IME_ON && modifiers == 0) action = settings::Action::On;
+    if (key == VK_IME_OFF && modifiers == 0) action = settings::Action::Off;
+    if (key == VK_CONVERT && action == settings::Action::On && japanese_mode_ && !input_.empty()) return false;
+    if (action == settings::Action::None || (action == settings::Action::AlternateSpace && !japanese_mode_)) return false;
+    if (!execute || (flags & (1LL << 30))) return true;
+    switch (action) {
+    case settings::Action::Off: set_input_mode(false); break;
+    case settings::Action::On: set_input_mode(true); break;
+    case settings::Action::Toggle: toggle_input_mode(); break;
+    case settings::Action::AlternateSpace:
+        finish_input(); input_context_ = context; display_text_ = U"\u3000"; display_cursor_ = 1;
+        request_edit(context, detail::EditOperation::Commit, true); clear_input(); break;
+    default: break;
+    }
+    return true;
+}
 STDMETHODIMP TextService::OnChange(REFGUID) { if (!updating_mode_) set_input_mode(get_value(open_compartment_.Get(), 1) != 0 && (get_value(conversion_compartment_.Get(), TF_CONVERSIONMODE_NATIVE) & TF_CONVERSIONMODE_NATIVE) != 0); return S_OK; }
 bool TextService::context_accepts_input(ITfContext* context) const {
     if (!context) return false;
@@ -147,9 +194,9 @@ std::u32string TextService::key_text(WPARAM key, LPARAM flags) const {
 bool TextService::wants_key(ITfContext* context, WPARAM key, LPARAM flags) const {
     if (!context_accepts_input(context)) return false;
     const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0, alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
-    if (key == VK_KANJI || key == VK_NONCONVERT || key == VK_CONVERT || (ctrl && !alt && key == VK_SPACE)) return true;
+    if (const_cast<TextService*>(this)->shortcut(context, key, flags, false)) return true;
     if (!japanese_mode_ || ctrl || alt) return false;
-    if (!input_.empty() && (key == VK_RETURN || key == VK_ESCAPE || key == VK_BACK || key == VK_DELETE || key == VK_LEFT || key == VK_RIGHT || key == VK_HOME || key == VK_END || key == VK_UP || key == VK_DOWN || key == VK_PRIOR || key == VK_NEXT || (key >= VK_F6 && key <= VK_F10))) return true;
+    if (!input_.empty() && (key == VK_CONVERT || key == VK_RETURN || key == VK_ESCAPE || key == VK_BACK || key == VK_DELETE || key == VK_LEFT || key == VK_RIGHT || key == VK_HOME || key == VK_END || key == VK_UP || key == VK_DOWN || key == VK_PRIOR || key == VK_NEXT || (key >= VK_F6 && key <= VK_F10))) return true;
     return !key_text(key, flags).empty();
 }
 STDMETHODIMP TextService::OnTestKeyDown(ITfContext* context, WPARAM key, LPARAM flags, BOOL* eaten) { if (!eaten) return E_POINTER; try { *eaten = wants_key(context, key, flags); } catch (...) { *eaten = FALSE; } return S_OK; }
@@ -160,16 +207,18 @@ STDMETHODIMP TextService::OnKeyDown(ITfContext* context, WPARAM key, LPARAM flag
     try {
         if (!wants_key(context, key, flags)) { if (!input_.empty()) finish_input(); return S_OK; }
         *eaten = TRUE;
-        if (key == VK_KANJI || (key == VK_SPACE && (GetKeyState(VK_CONTROL) & 0x8000))) { toggle_input_mode(); return S_OK; }
-        if (key == VK_NONCONVERT) { set_input_mode(false); return S_OK; }
-        if (key == VK_CONVERT && !japanese_mode_) { set_input_mode(true); return S_OK; }
+        if (shortcut(context, key, flags, true)) return S_OK;
         if (input_context_ && input_context_.Get() != context) finish_input();
         input_context_ = context;
         if (!input_.empty()) {
             if (key == VK_RETURN) { finish_input(); return S_OK; }
             if (key == VK_ESCAPE) { if (selecting_ || literal_) { refresh_input(context, false); } else finish_input(true); return S_OK; }
             if (key == VK_SPACE || key == VK_CONVERT || key == VK_DOWN || key == VK_UP || key == VK_PRIOR || key == VK_NEXT) {
-                if (candidates_.empty()) candidates_.push_back({input_.reading().kana, {}});
+                if (!finalizing_reading_ && input_.reading().pending == U"n") {
+                    finalizing_reading_ = true; candidates_.clear(); selected_ = 0;
+                    converter_->submit(coordinator_.make_request(input_.reading(true).kana));
+                }
+                if (candidates_.empty()) candidates_.push_back({input_.reading(finalizing_reading_).kana, {}});
                 if (selecting_) { const auto step = key == VK_PRIOR || key == VK_NEXT ? 9 : 1; if (key == VK_UP || key == VK_PRIOR) selected_ = (selected_ + candidates_.size() - static_cast<std::size_t>(step) % candidates_.size()) % candidates_.size(); else selected_ = (selected_ + step) % candidates_.size(); }
                 selecting_ = true; literal_ = false; choose_candidate(selected_, false); return S_OK;
             }
@@ -192,8 +241,22 @@ STDMETHODIMP TextService::OnKeyDown(ITfContext* context, WPARAM key, LPARAM flag
         input_.insert(text); refresh_input(context); return S_OK;
     } catch (...) { *eaten = FALSE; return E_FAIL; }
 }
-STDMETHODIMP TextService::OnPreservedKey(ITfContext*, REFGUID, BOOL* eaten) { if (!eaten) return E_POINTER; *eaten = FALSE; return S_OK; }
+STDMETHODIMP TextService::OnPreservedKey(ITfContext* context, REFGUID guid, BOOL* eaten) {
+    if (!eaten) return E_POINTER; *eaten = FALSE;
+    if (!context_accepts_input(context)) return S_OK;
+    try {
+        for (std::size_t i = 0; i < shortcut_guids.size(); ++i) if (guid == shortcut_guids[i]) {
+            const auto key = i >= 6 ? VK_OEM_3 : settings::bindings[i].key;
+            const auto flags = i == 7 ? (0x29 << 16) : 0;
+            *eaten = shortcut(context,key,flags,true);
+            if (!*eaten && key == VK_CONVERT && japanese_mode_ && !input_.empty()) return OnKeyDown(context,key,flags,eaten);
+            break;
+        }
+    } catch (...) { return E_FAIL; }
+    return S_OK;
+}
 void TextService::refresh_input(ITfContext* context, bool convert) {
+    finalizing_reading_ = false;
     selecting_ = false; literal_ = !convert; candidates_.clear(); selected_ = 0;
     if (input_.empty()) { finish_input(true); return; }
     const auto reading = input_.reading(); display_text_ = reading.text(); display_cursor_ = input_.display_cursor();
@@ -203,9 +266,9 @@ void TextService::refresh_input(ITfContext* context, bool convert) {
 }
 void TextService::conversion_ready() {
     const auto response = converter_->take_result();
-    if (!response || !coordinator_.is_current(*response) || input_.empty() || !input_context_ || literal_ || selecting_) return;
+    if (!response || !coordinator_.is_current(*response) || input_.empty() || !input_context_ || literal_) return;
     candidates_ = response->candidates; engine_available_ = !candidates_.empty();
-    const auto reading = input_.reading();
+    const auto reading = input_.reading(finalizing_reading_);
     for (const auto& fallback : {reading.kana, core::to_katakana(reading.kana)}) if (!fallback.empty() && std::none_of(candidates_.begin(), candidates_.end(), [&](const auto& c) { return c.text == fallback; })) candidates_.push_back({fallback, {}});
     if (candidates_.empty()) return;
     selected_ = 0; display_text_ = candidates_[0].text + reading.pending; display_cursor_ = display_text_.size();
@@ -213,14 +276,14 @@ void TextService::conversion_ready() {
 }
 void TextService::choose_candidate(std::size_t index, bool commit) {
     if (index >= candidates_.size()) return;
-    selected_ = index; display_text_ = candidates_[index].text + input_.reading().pending; display_cursor_ = display_text_.size();
+    selected_ = index; display_text_ = candidates_[index].text + input_.reading(finalizing_reading_).pending; display_cursor_ = display_text_.size();
     if (commit) finish_input(); else request_edit(input_context_.Get(), detail::EditOperation::Update, true);
 }
-void TextService::clear_input() { (void)coordinator_.invalidate(); input_.clear(); display_text_.clear(); candidates_.clear(); selecting_ = literal_ = false; selected_ = display_cursor_ = 0; input_context_.Reset(); if (candidate_ui_) candidate_ui_->hide(); }
+void TextService::clear_input() { (void)coordinator_.invalidate(); input_.clear(); display_text_.clear(); candidates_.clear(); selecting_ = literal_ = finalizing_reading_ = false; selected_ = display_cursor_ = 0; input_context_.Reset(); if (candidate_ui_) candidate_ui_->hide(); }
 void TextService::finish_input(bool cancel) {
     ComPtr<ITfContext> context = input_context_ ? input_context_ : composition_context_;
     if (context && (composition_ || !input_.empty())) {
-        if (!cancel && !literal_ && !input_.reading().pending.empty()) {
+        if (!cancel && !literal_ && !input_.reading(finalizing_reading_).pending.empty()) {
             const auto reading = input_.reading(); const auto finalized = input_.reading(true);
             if (!candidates_.empty() && selected_ < candidates_.size() && finalized.kana.starts_with(reading.kana)) display_text_ = candidates_[selected_].text + finalized.kana.substr(reading.kana.size()) + finalized.pending;
             else display_text_ = finalized.text();

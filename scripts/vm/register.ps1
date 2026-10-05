@@ -38,6 +38,31 @@ try {
         [IO.File]::WriteAllText($temporaryMarker, $BuildId, [Text.UTF8Encoding]::new($false))
         Move-Item -LiteralPath $temporaryMarker -Destination $activeBuildFile -Force
 
+        $settingsExe = Join-Path $buildDirectory 'settings\LiveImeSettings.exe'
+        if (Test-Path -LiteralPath $settingsExe) {
+            $desktop = [Environment]::GetFolderPath('DesktopDirectory')
+            if (-not [string]::IsNullOrWhiteSpace($desktop)) {
+                New-Item -ItemType Directory -Force -Path $desktop | Out-Null
+                $shell = New-Object -ComObject WScript.Shell
+                $shortcut = $null
+                try {
+                    # Keep PowerShell source ASCII: Windows PowerShell 5.1 reads
+                    # UTF-8 without a BOM as the system ANSI code page.
+                    $shortcutName = 'Live IME ' + [char]0x8A2D + [char]0x5B9A + '.lnk'
+                    $shortcut = $shell.CreateShortcut((Join-Path $desktop $shortcutName))
+                    $shortcut.TargetPath = $settingsExe
+                    $shortcut.WorkingDirectory = Split-Path $settingsExe
+                    $shortcut.Description = "Live IME settings, development build $BuildId"
+                    $shortcut.Save()
+                } finally {
+                    if ($null -ne $shortcut) {
+                        [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcut) | Out-Null
+                    }
+                    [Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) | Out-Null
+                }
+            }
+        }
+
         $oldBuilds = Get-ChildItem -LiteralPath (Join-Path $DeploymentRoot 'builds') -Directory |
             Where-Object { $_.Name -match '^\d{6}$' } |
             Sort-Object Name -Descending |

@@ -10,6 +10,33 @@ public final class NamedPipeEngineHost {
     }
 
     public func run(pipeName: String = #"\\.\pipe\windows-live-ime"#) throws {
+        // PowerShell Direct starts an elevated host. Explicitly grant this
+        // account access so its normal desktop apps can also use the engine.
+        var token: HANDLE?
+        guard OpenProcessToken(GetCurrentProcess(), DWORD(TOKEN_QUERY), &token), let token else {
+            throw EngineHostError.pipeCreateFailed
+        }
+        defer { _ = CloseHandle(token) }
+        var required: DWORD = 0
+        _ = GetTokenInformation(token, TokenUser, nil, 0, &required)
+        let tokenBuffer = UnsafeMutableRawPointer.allocate(byteCount: Int(required), alignment: MemoryLayout<TOKEN_USER>.alignment)
+        defer { tokenBuffer.deallocate() }
+        guard GetTokenInformation(token, TokenUser, tokenBuffer, required, &required) else {
+            throw EngineHostError.pipeCreateFailed
+        }
+        var sidText: LPWSTR?
+        guard ConvertSidToStringSidW(tokenBuffer.assumingMemoryBound(to: TOKEN_USER.self).pointee.User.Sid, &sidText), let sidText else {
+            throw EngineHostError.pipeCreateFailed
+        }
+        defer { _ = LocalFree(sidText) }
+        let sid = String(decodingCString: sidText, as: UTF16.self)
+        let descriptorText = Array("D:(A;;GA;;;\(sid))(A;;GA;;;SY)(A;;GA;;;BA)S:(ML;;NW;;;ME)".utf16) + [0]
+        var descriptor: PSECURITY_DESCRIPTOR?
+        guard descriptorText.withUnsafeBufferPointer({ ConvertStringSecurityDescriptorToSecurityDescriptorW($0.baseAddress, DWORD(SDDL_REVISION_1), &descriptor, nil) }) else {
+            throw EngineHostError.pipeCreateFailed
+        }
+        defer { _ = LocalFree(descriptor) }
+        var security = SECURITY_ATTRIBUTES(nLength: DWORD(MemoryLayout<SECURITY_ATTRIBUTES>.size), lpSecurityDescriptor: descriptor, bInheritHandle: false)
         let wideName = Array(pipeName.utf16) + [0]
         let pipe = wideName.withUnsafeBufferPointer { buffer in
             CreateNamedPipeW(
@@ -20,7 +47,7 @@ public final class NamedPipeEngineHost {
                 64 * 1024,
                 64 * 1024,
                 0,
-                nil
+                &security
             )
         }
         guard let pipe, pipe != INVALID_HANDLE_VALUE else {
@@ -37,6 +64,9 @@ public final class NamedPipeEngineHost {
                 let response = try handle(request)
                 let bytes = try response.encoded()
                 try write(bytes, to: pipe)
+                // DisconnectNamedPipe discards unread response data. Wait for
+                // the client to consume the conversion response before reuse.
+                _ = FlushFileBuffers(pipe)
             } catch {
                 print("Named Pipe request failed: \(error)")
             }

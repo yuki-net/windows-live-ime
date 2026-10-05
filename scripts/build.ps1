@@ -44,7 +44,8 @@ try {
     if (-not (Test-Path -LiteralPath $swiftBinDirectory)) {
         throw "SwiftPM output directory does not exist: $swiftBinDirectory"
     }
-    Get-ChildItem -LiteralPath $swiftBinDirectory -Force | ForEach-Object {
+    Get-ChildItem -LiteralPath $swiftBinDirectory -Force |
+        Where-Object { $_.Name -eq 'engine-host.exe' -or $_.Name -like '*.bundle' } | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination $artifactDirectory -Recurse -Force
     }
 
@@ -78,6 +79,21 @@ try {
     }
     if (-not $CoreOnly -and -not (Test-Path -LiteralPath (Join-Path $artifactDirectory 'windows-live-ime.dll'))) {
         throw 'The TSF DLL was not produced by the full Windows build.'
+    }
+
+    & (Join-Path $PSScriptRoot 'write-build-info.ps1') -Destination $artifactDirectory
+    if (-not $CoreOnly) {
+        $settingsConfiguration = if ($Configuration -eq 'Debug') { 'Debug' } else { 'Release' }
+        & (Join-Path $PSScriptRoot 'build-settings.ps1') -Configuration $settingsConfiguration
+        if (-not $?) { throw 'WinUI settings app build failed.' }
+        $settingsOutput = Join-Path $repoRoot "build\settings\$settingsConfiguration"
+        $settingsDestination = Join-Path $artifactDirectory 'settings'
+        New-Item -ItemType Directory -Force -Path $settingsDestination | Out-Null
+        Get-ChildItem -LiteralPath $settingsOutput |
+            Where-Object { $_.Name -notin @('smoke-test.json', 'startup-error.log') } |
+            Copy-Item -Destination $settingsDestination -Recurse -Force
+        # One identity for the IME and settings app in the same deployment.
+        Copy-Item -LiteralPath (Join-Path $artifactDirectory 'build-info.json') -Destination $settingsDestination -Force
     }
 
     Write-Host "Build artifacts with Swift and MSVC runtime files: $artifactDirectory"

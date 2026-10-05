@@ -66,6 +66,8 @@ private:
     void clear_input();
     void finish_input(bool cancel = false);
     void choose_candidate(std::size_t index, bool commit);
+    bool shortcut(ITfContext* context, WPARAM key, LPARAM flags, bool execute);
+    void preserve_shortcuts(bool remove);
     void update_candidate_window(TfEditCookie cookie, ITfContext* context, ITfRange* range);
     static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
 
@@ -87,6 +89,7 @@ private:
     bool ending_composition_{false};
     bool selecting_{false};
     bool literal_{false};
+    bool finalizing_reading_{false};
     bool engine_available_{true};
     std::uint64_t edit_generation_{0};
     std::size_t selected_{0};
