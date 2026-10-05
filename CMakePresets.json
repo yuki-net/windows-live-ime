@@ -1,0 +1,30 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-x64",
+      "displayName": "Windows x64 (MSVC + Ninja Multi-Config)",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/windows",
+      "cacheVariables": {
+        "WINDOWS_LIVE_IME_BUILD_TSF": "ON",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "core-only",
+      "displayName": "Core and IPC tests (no TSF DLL)",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/core",
+      "cacheVariables": {
+        "WINDOWS_LIVE_IME_BUILD_TSF": "OFF",
+        "BUILD_TESTING": "ON"
+      }
+    }
+  ]
+}

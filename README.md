@@ -7,6 +7,41 @@ Windows上で、macOSのライブ変換に近い入力体験を目指す日本�
 > [!NOTE]
 > 現在は初期開発段階です。プロジェクト名 `windows-live-ime` は仮称です。
 
+## 開発版の入力操作
+
+### バージョン確認
+
+VM内でLive IMEを選び、タスクバーの「A／あ」を右クリックして「設定」を開きます。左サイドバーの「バージョン情報」にバージョン、Gitコミット、ビルド日時が表示されます。「Windowsに登録されているIME」と「アプリが読み込んでいるIME」も確認できるので、旧版が残っている場合に区別できます。「情報を更新」で再確認します。VMのデスクトップにある「Live IME 設定」からも開けます。
+
+右クリックメニューの「ひらがな」「半角英数字」は入力モードを切り替えます。全角カタカナ・全角英数字・半角カタカナの固定入力モード、単語の追加、プライベートモードは「（未実装）」付きの無効な項目です。F6〜F10による入力中の文字種変換とは別の機能です。
+
+設定の「ショートカット」で半角／全角・無変換・変換・英数・Ctrl+Space・Shift+Spaceへ機能を割り当てます。変更は同じWindowsユーザーのレジストリへ自動保存し、次の入力から反映します。VMで半角／全角がUS配列の`として認識される場合の補助設定もあります。Ctrl+Spaceの既定は「なし」で、切り替えに使いたい場合は「ひらがな／半角英数字」を選びます。
+
+キーの役割は[Microsoft IMEの公式説明](https://support.microsoft.com/ja-jp/windows/hardware/input-devices/microsoft-japanese-ime)を参考にしています。無変換のIME-オフ／変換のIME-オンはこの開発版の既定で、カスタマイズできます。
+
+設定画面だけをホストで開く場合はCLionの `Settings App` を実行します。これはIMEを登録しません。コマンドで設定アプリだけをビルドする場合は `scripts/build-settings.ps1 -Configuration Release` を使用します。
+
+WinUI 3のビルドに必要なNuGetパッケージは `build/nuget/` に取得します。Windows App SDKのビルド処理用Roslynコンパイラもここへ取得するため、Visual StudioにC#ワークロードを追加する必要はありません。設定アプリの言語はC++/WinRTです。
+
+### 入力
+
+VM内で「Live IME」を選んで使用します。現在の入力実装は実験段階で、実アプリでの操作確認は継続中です。
+
+| 操作 | キー |
+|---|---|
+| 日本語／英数の切り替え | 半角／全角、英数、US配列ではAlt+`、言語バーの「あ／A」 |
+| 日本語へ切り替え | 変換 |
+| 英数へ切り替え | 無変換 |
+| 候補表示・次候補 | Space、↓ |
+| 前候補 | ↑ |
+| 候補ページ移動 | PageUp / PageDown |
+| 候補を選んで確定 | 1〜9 |
+| 確定 | Enter |
+| 候補選択解除・入力取消 | Esc |
+| ひらがな／カタカナ／半角カナ／全角英数／半角英数 | F6〜F10 |
+
+日本語モードではローマ字入力をかなへ変え、別プロセスのエンジンから届いた最新の候補を入力中に反映します。
+
 ## Goals
 
 - Windowsで低遅延なライブ変換を実現する
@@ -178,9 +213,62 @@ IME本体の候補表示にはWinUIを直接使用せず、Win32 HWND上へDirec
 
 ## Development
 
-初期構築中です。ビルド・インストール・デバッグ手順は基盤実装と合わせて追加します。
+### 必要な環境
 
-IMEの不具合は利用中アプリケーションへ影響する可能性があるため、初期開発ではVMまたは開発専用環境での検証を推奨します。
+- Windows 11 x64
+- Visual Studio 2022 の MSVC x64/x86 build tools
+- Windows 11 SDK
+- CMake 3.25 以上、Ninja
+- Swift for Windows 6.1 以上
+- PowerShell 5.1 と Git for Windows
+- Hyper-V と Windows 11 x64 の開発VM（VM統合サービスを有効にする）
+- JetBrains CLion
+
+ビルドスクリプトは Visual Studio の開発環境を初期化し、CMake/Ninja は PATH または CLion/Visual Studio の標準配置先から探します。Swift for Windows は PATH または公式インストーラーの標準配置先から探し、Windows SDK の `SDKROOT` も自動設定します。Windows SDK は TSF DLL と Swift toolchain が使います。
+
+AzooKeyKanaKanjiConverter は revision `80b8204f1cdfb364bb2ed355cf52c7ebb2519a0c`（`v0.11.2`）へ固定しています。このパッケージの manifest は Windows では一部依存を除外しますが、README の検証済みOS一覧に Windows は含まれていません。Windows runner のCIでビルドと最小変換を確認します。
+
+### C++ build / tests
+
+```powershell
+scripts/build.ps1 -Configuration Debug
+scripts/test.ps1 -Configuration Debug -NoBuild
+```
+
+`scripts/test.ps1` は Core/IPC の CTest、Swift の unit tests、AzooKey の初期化と最小変換を確認します。engine hostのself-checkはSwift/MSVC runtime DLLのPATH依存を外して実行し、VMへ配布する成果物だけで起動することも確認します。`-NoBuild` を外すと、先に build も実行します。`-CoreOnly` は TSF DLL を除いた Core/IPC 検証に使います。
+
+### Git pre-push hook
+
+```powershell
+scripts/setup-hooks.ps1
+```
+
+hook は Core/IPC の build と tests、engine host の build/check を実行します。VM 起動やIME登録は行いません。標準 Git の `--no-verify` 以外の bypass は設けていません。
+
+### Hyper-V development VM
+
+スクリプトは既存の Windows 11 x64 VM を使用します。初回は VM のローカル管理者アカウントを現在のWindowsユーザーで暗号化保存し、VM名を既定値 `WindowsLiveImeDev` に合わせます。engine host、Swift runtime DLL、MSVC x64 runtime DLLを同じ build 世代のフォルダーに配置するため、VMにSwift toolchainやVisual Studioをインストールする必要はありません。
+
+```powershell
+scripts/vm/setup-credential.ps1
+scripts/vm/setup.ps1
+```
+
+資格情報は `%LOCALAPPDATA%\windows-live-ime\vm-credential.xml` にユーザー単位で保護して保存され、リポジトリへ書き込みません。ホストとVMの間は PowerShell Direct を使うため、SSH、WinRM、固定IPは不要です。VMは事前に作成し、Windows 11をインストールしておく必要があります。
+
+CLion の `Dev IME` 共有Run Configurationは `scripts/dev.ps1` だけを呼びます。スクリプトがbuild、VM起動、世代別deploy、旧登録解除、新登録、engine-host起動とNamed Pipe health check、Notepad起動、VMConnectまで進めます。
+
+```powershell
+scripts/dev.ps1 -VMName WindowsLiveImeDev -Configuration Release
+```
+
+各deployは `C:\windows-live-ime-dev\builds\000001` のような別ディレクトリへ配置します。TSF DLLを同じ場所へ上書きしません。`scripts/vm/reset.ps1` は登録を解除してVMをシャットダウンし、deploy世代は保持します。任意のVM checkpointへ戻す場合は `-CheckpointName <name>` を指定します。
+
+共有Run Configurationは `.run/` にあります。`Core Tests` は build/test を実行し、`Reset Dev VM` は上記のreset scriptを実行します。
+
+### CI
+
+GitHub Actions は Windows 2022 runner で、MSVC/CMake/Ninja、Swift 6.1.3、Core、TSF DLL、IPC protocol、engine host と AzooKey 依存をbuild/testします。Pull Request と `develop` へのpushで動きます。
 
 ## License
 

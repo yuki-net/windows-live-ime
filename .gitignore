@@ -1,0 +1,15 @@
+# CMake and IDE build output
+/build/
+/cmake-build-*/
+/.vs/
+/.idea/
+*.user
+*.suo
+
+# SwiftPM output
+**/.build/
+**/.swiftpm/
+
+# Local credentials and logs
+*.log
+vm-credential.xml
