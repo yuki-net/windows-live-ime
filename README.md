@@ -19,7 +19,7 @@ VM内でLive IMEを選び、タスクバーの「A／あ」を右クリックし
 
 キーの役割は[Microsoft IMEの公式説明](https://support.microsoft.com/ja-jp/windows/hardware/input-devices/microsoft-japanese-ime)を参考にしています。無変換のIME-オフ／変換のIME-オンはこの開発版の既定で、カスタマイズできます。
 
-設定画面だけをホストで開く場合はCLionの `Settings App` を実行します。これはIMEを登録しません。コマンドで設定アプリだけをビルドする場合は `scripts/build-settings.ps1 -Configuration Release` を使用します。
+設定画面単体の開発では、CLIから `scripts/run-settings.ps1 -Configuration Release` を実行してホストでビルド・起動できます。これはIMEを登録しません。ビルドだけ行う場合は `scripts/build-settings.ps1 -Configuration Release` を使用します。通常のIME確認ではVM内の「あ／A」を右クリックして設定を開きます。
 
 WinUI 3のビルドに必要なNuGetパッケージは `build/nuget/` に取得します。Windows App SDKのビルド処理用Roslynコンパイラもここへ取得するため、Visual StudioにC#ワークロードを追加する必要はありません。設定アプリの言語はC++/WinRTです。
 
@@ -264,7 +264,7 @@ scripts/dev.ps1 -VMName WindowsLiveImeDev -Configuration Release
 
 各deployは `C:\windows-live-ime-dev\builds\000001` のような別ディレクトリへ配置します。TSF DLLを同じ場所へ上書きしません。`scripts/vm/reset.ps1` は登録を解除してVMをシャットダウンし、deploy世代は保持します。任意のVM checkpointへ戻す場合は `-CheckpointName <name>` を指定します。
 
-共有Run Configurationは `.run/` にあります。`Core Tests` は build/test を実行し、`Reset Dev VM` は上記のreset scriptを実行します。
+共有Run Configurationは `.run/` の `Core Tests` と `Dev IME` に限定しています。`Core Tests` は build/test、`Dev IME` はVMでのIME確認を行います。VMの登録解除・シャットダウンが必要な保守作業では、CLIから `scripts/vm/reset.ps1` を実行します。
 
 ### CI
 
