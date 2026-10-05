@@ -36,7 +36,7 @@ ModeButtonのOnClick(TF_LBI_CLK_RIGHT)はネイティブのポップアップを
 
 `VERSION` が製品バージョンの元です。ビルド時にGit commit、未コミット変更の有無、UTC日時を `build-info.json` に記録します。同じdeployに含まれるIMEと設定アプリには同じ情報ファイルを配置します。古いdeployには情報ファイルがないため、旧版または情報なしとして表示します。
 
-`scripts/build-settings.ps1` は設定アプリのみをMSBuildでビルドします。ビルド環境にはMSVC、MSBuild、Windows SDK 26100が必要です。Windows App SDKのinline MSBuildタスク用Roslyn compilerは `Microsoft.Net.Compilers.Toolset 4.14.0` としてbuild内に取得します。ホストへのコンポーネント追加を必須にせず、アプリ自体はC++です。CLionの `Settings App` 構成は設定アプリのみを起動します。
+`scripts/build-settings.ps1` は設定アプリのみをMSBuildでビルドします。ビルド環境にはMSVC、MSBuild、Windows SDK 26100が必要です。Windows App SDKのinline MSBuildタスク用Roslyn compilerは `Microsoft.Net.Compilers.Toolset 4.14.0` としてbuild内に取得します。ホストへのコンポーネント追加を必須にせず、アプリ自体はC++です。単体開発用のCLI `scripts/run-settings.ps1` は設定アプリをビルド・起動します。共有CLion構成は日常用途の `Core Tests` と `Dev IME` に限定し、VMの登録解除・シャットダウン・checkpoint復元は保守用CLI `scripts/vm/reset.ps1` を使用します。
 
 通常のWindows buildは設定アプリも `artifacts/<configuration>/settings/` へ配置します。VMのregisterはデスクトップの「Live IME 設定」ショートカットを、そのdeployの設定exeへ更新します。設定アプリを開くだけではIMEの登録を変更しません。
 
